@@ -1,0 +1,390 @@
+---
+title: "Latency Analysis"
+output: html_document
+---
+``` {r required packages, include = FALSE}
+library(arm, quietly = TRUE) # display(), coefplot() etc.
+library(ggeffects, quietly = TRUE) # Estimated Marginal Means
+library(ggfortify, quietly = TRUE) # autoplot()
+library(marginaleffects, quietly = TRUE) # Estimated Marginal Means
+library(SMPracticals, quietly = TRUE) # darwin dataframe
+library("tidyverse")
+library("lubridate")
+library("coxphf")
+library(survival)
+library(survminer)
+library("viridis")
+```
+
+# Latency to parasitism analyses
+For the latency to parasitism data, I tried two different types of analysis, first using an anova, to compare the different times for each behaviour. I then decided to use a survival analysis, as I believed it would fit better with the censored data I had collected. 
+
+## ANOVA analysis on MT data
+Reading and cleaning the data:
+
+Note that in the data, NA implies that wasps did not complete the action in the given hour (i.e. NA in success = wasp did not have a successful parasitism attempt within the hour). 
+```{r reading and cleaning, message=FALSE, warning=FALSE}
+para_df <- read.csv("/cloud/project/data/Results.csv",
+                    colClasses = c("First.approach" = "character", "First.attempt"="character", "First.success"="character"))
+print(para_df)
+
+# Convert "mm:ss.ms" format to total seconds
+para_df$First.attempt <- sapply(para_df$First.attempt, function(x) {
+  time_parts <- unlist(strsplit(x, ":"))  # Split minutes and seconds
+  as.numeric(time_parts[1]) * 60 + as.numeric(time_parts[2])  # Convert to total seconds
+})
+para_df$First.success <- sapply(para_df$First.success, function(x) {
+  time_parts <- unlist(strsplit(x, ":"))  # Split minutes and seconds
+  as.numeric(time_parts[1]) * 60 + as.numeric(time_parts[2])  # Convert to total seconds
+})
+para_df$First.approach <- sapply(para_df$First.approach, function(x) {
+  time_parts <- unlist(strsplit(x, ":"))  # Split minutes and seconds
+  as.numeric(time_parts[1]) * 60 + as.numeric(time_parts[2])  # Convert to total seconds
+})
+
+para_df$Treatment <- factor(para_df$Treatment) # converting into a factor
+para_df$Treatment <- factor(trimws(para_df$Treatment))  # Remove extra spaces
+```
+
+Visualising the data as boxplots:
+```{r boxplots, warning=FALSE}
+# FIRST SUCCESS #
+ggplot(para_df, aes(x = Treatment, y = First.success, 
+                          colour = Treatment )) +
+  labs(title = "Latency to successful parasitism in parasitoid wasps", 
+       y = "First successful parasitism (s)") +
+  scale_x_discrete(limits=c("NL", "L", "T10", "T50")) +
+  geom_boxplot() +
+  theme_bw() +
+ scale_colour_viridis(discrete = TRUE, option = "D")
+
+# FIRST ATTEMPT #
+ggplot(para_df, aes(x = Treatment, y = First.attempt, 
+                           colour = Treatment )) +
+  labs(title = "Latency to attempted parasitism in parasitoid wasps", 
+       y = "First attempt at parasitism (s)") +
+  scale_x_discrete(limits=c("NL", "L", "T10", "T50")) +
+  geom_boxplot() +
+  theme_bw() +
+scale_colour_viridis(discrete = TRUE, option = "D")
+
+# FIRST APPROACH #
+ggplot(para_df, aes(x = Treatment, y = First.approach, 
+                           colour = Treatment )) +
+  labs(title = "Latency to first approach in parasitoid wasps", 
+       y = "First approach (s)") +
+  scale_x_discrete(limits=c("NL", "L", "T10", "T50")) +
+  geom_boxplot() +
+  theme_bw() +
+scale_colour_viridis(discrete = TRUE, option = "D")
+```
+After visualising the data, I tried transforming it, to see whether that would clarify any trends. First I looked at the spread of the raw data. 
+``` {r raw data, warning = FALSE}
+
+#starting off with visualising the distrbution
+# FIRST SUCCESS #
+  ggplot(para_df, aes(x = First.success)) +
+  geom_histogram(bins = 50) + 
+  facet_wrap(~ Treatment, nrow = 2)
+### qqplot
+  ggplot(para_df, aes(sample = First.success)) +
+    geom_qq() +
+    geom_qq_line(colour = "limegreen") +
+    facet_wrap(~ Treatment, nrow=2)
+  
+# FIRST ATTEMPT #
+  ggplot(para_df, aes(x = First.attempt)) +
+    geom_histogram(bins = 50) + 
+    facet_wrap(~ Treatment, nrow = 2) 
+  ### qqplot
+  ggplot(para_df, aes(sample = First.attempt)) +
+    geom_qq() +
+    geom_qq_line(colour = "limegreen") +
+    facet_wrap(~ Treatment, nrow=2)   
+
+# FIRST APPROACH # 
+  ggplot(para_df, aes(x = First.approach)) +
+    geom_histogram(bins = 50) + 
+    facet_wrap(~ Treatment, nrow = 2)
+  ### qqplot
+  ggplot(para_df, aes(sample = First.approach)) +
+    geom_qq() +
+    geom_qq_line(colour = "limegreen") +
+    facet_wrap(~ Treatment, nrow=2)
+```
+After looking at the spread of the data, I applied a log-transformation:
+
+``` {r log-transformation, warning = FALSE}
+# FIRST SUCCESS #
+  ### qqplot 
+  ggplot(para_df, aes(sample = log(First.success))) + #applying a log transformation 
+    geom_qq() +
+    geom_qq_line(colour = "limegreen") +
+    facet_wrap(~ Treatment, nrow=2)
+### first success looks a lot closer to a normal distribution WOOOO NOW I CAN DO AN ANOVA ### 
+
+# FIRST ATTEMPT # 
+  ### qqplot 
+  ggplot(para_df, aes(sample = log(First.attempt))) +
+    geom_qq() +
+    geom_qq_line(colour = "limegreen") +
+    facet_wrap(~ Treatment, nrow=2)
+### not looking quite as pretty as first success but hey it's something ###
+  
+# FIRST APPROACH #
+
+  ### qqplot 
+  ggplot(para_df, aes(sample = log(First.approach))) +
+    geom_qq() +
+    geom_qq_line(colour = "limegreen") +
+    facet_wrap(~ Treatment, nrow=2)
+```
+
+I then looked at the transformed data, to see whether the trends were any clearer:
+
+``` {r boxplot transformed, warning = FALSE}
+##PLOTTING THE TRANSFORMED DATA ##
+# FIRST SUCCESS #
+ggplot(para_df, aes(x = Treatment, y = log(First.success), 
+                          colour = Treatment )) +
+  labs(title = "Latency to successful parasitism in parasitoid wasps", 
+       y = "First successful parasitism (s)") +
+  scale_x_discrete(limits=c("NL", "L", "T10", "T50")) +
+  geom_boxplot() +
+  theme_bw() +
+ scale_colour_viridis(discrete = TRUE, option = "D")
+
+# FIRST ATTEMPT #
+ggplot(para_df, aes(x = Treatment, y = log(First.attempt), 
+                           colour = Treatment )) +
+  labs(title = "Latency to attempted parasitism in parasitoid wasps", 
+       y = "First attempt at parasitism (s)") +
+  scale_x_discrete(limits=c("NL", "L", "T10", "T50")) +
+  geom_boxplot() +
+  theme_bw() +
+scale_colour_viridis(discrete = TRUE, option = "D")
+
+# FIRST APPROACH #
+ggplot(para_df, aes(x = Treatment, y = log(First.approach), 
+                           colour = Treatment )) +
+  labs(title = "Latency to first approach in parasitoid wasps", 
+       y = "First approach (s)") +
+  scale_x_discrete(limits=c("NL", "L", "T10", "T50")) +
+  geom_boxplot() +
+  theme_bw() +
+scale_colour_viridis(discrete = TRUE, option = "D")
+```
+
+To analyse the data, I initially did an ANOVA:
+``` {r anova}
+## ANOVA ON THE TRANSFORMED DATA ##
+#fitting linear models onto transformed data
+succ_mod =  lm(log(First.success) ~ Treatment, para_df) #linear model for succes 
+att_mod =  lm(log(First.attempt) ~ Treatment, para_df) # same for attempt
+app_mod =  lm(log(First.approach) ~ Treatment, para_df) # same for approach
+
+#generating anova tables for the data
+anova(succ_mod) #first success
+summary(aov(succ_mod))
+Success_tukey <- TukeyHSD(aov(succ_mod))
+Success_tukey
+#p-value greater than 0.05, cannot reject null hyp
+
+anova(att_mod)
+summary(aov(att_mod))
+TukeyHSD(aov(att_mod))
+#p-value greater than 0.05, cannot reject null hyp
+
+anova(app_mod)
+summary(aov(app_mod))
+TukeyHSD(aov(app_mod))
+#p-value greater than 0.05, cannot reject null hyp
+```
+## Survival analysis, MT data
+Using the same cleaned data, I created Kaplan Meier curves for the latencies of each behaviour. 
+
+``` {r kaplan-meier}
+##CREATING THE KAPLAN MEIER FOR LATENCY TO EVENT##
+para_df$event_approach <- ifelse(is.na(para_df$First.approach), 0, 1)
+para_df$event_attempt <- ifelse(is.na(para_df$First.attempt), 0, 1)
+para_df$event_success <- ifelse(is.na(para_df$First.success), 0, 1)
+
+# First Approach
+surv_approach <- Surv(time = para_df$First.approach, event = para_df$event_approach)
+km_approach <- survfit(surv_approach ~ Treatment, data = para_df)
+
+# First Attempt
+surv_attempt <- Surv(time = para_df$First.attempt, event = para_df$event_attempt)
+km_attempt <- survfit(surv_attempt ~ Treatment , data = para_df)
+
+# First Success
+surv_success <- Surv(time = para_df$First.success, event = para_df$event_success)
+km_success <- survfit(surv_success ~ Treatment, data = para_df)
+
+
+# Create a combined dataframe
+km_data <- bind_rows(
+  data.frame(Time = para_df$First.approach, Event = para_df$event_approach, 
+             Treatment = para_df$Treatment, Type = "Approach"),
+  data.frame(Time = para_df$First.attempt, Event = para_df$event_attempt, 
+             Treatment = para_df$Treatment, Type = "Attempt"),
+  data.frame(Time = para_df$First.success, Event = para_df$event_success, 
+             Treatment = para_df$Treatment, Type = "Success")
+)
+
+# Fit Kaplan-Meier survival curves
+km_fit <- survfit(Surv(Time, Event) ~ Treatment + Type, data = km_data)
+
+# Plot with facet_wrap
+n_groups = length(unique(para_df$Treatment))
+my_palette <- viridis(n_groups, option = "D") # creating a custom palette 
+
+MT_plot = ggsurvplot_facet(km_fit, km_data, facet.by = "Type", 
+                 legend.labs = c("L", "NL", "T10", "T50"),
+                 xlab = "Time (s)",
+                 aes = aes(colour = strata), 
+                 ylab = "Proportion of wasps yet to act",
+                 conf.int = FALSE,
+                 size = 1,
+                 palette = my_palette,
+                 pval = TRUE,
+                 pval.coord = c(2800, 0.95), 
+                 xlim = c(0,3000), 
+                 risk.table = FALSE,
+                 break.time.by = 200,
+                 ggtheme = theme_light()) +
+  facet_grid(Type ~ .) +
+  theme(strip.text = element_text(size = 12, color = "black"))
+
+print(MT_plot)
+```
+
+Then I used a penalised Cox Proportional Hazards model to check the hazards ratios. 
+``` {r Coxphf}
+##CREATING THE KAPLAN MEIER FOR MULTIPLE TIME-TO-EVENT##
+para_df$event_approach <- ifelse(is.na(para_df$First.approach), 0, 1)
+para_df$event_attempt <- ifelse(is.na(para_df$First.attempt), 0, 1)
+para_df$event_success <- ifelse(is.na(para_df$First.success), 0, 1)
+# changing NAs into max time 
+max_time <- 3600
+para_df$First.approach[is.na(para_df$First.approach)] <- max_time
+para_df$First.attempt[is.na(para_df$First.attempt)] <- max_time
+para_df$First.success[is.na(para_df$First.success)] <- max_time
+
+# First Approach
+surv_approach <- Surv(time = para_df$First.approach, event = para_df$event_approach)
+km_approach <- survfit(surv_approach ~ Treatment, data = para_df)
+
+# First Attempt
+surv_attempt <- Surv(time = para_df$First.attempt, event = para_df$event_attempt)
+km_attempt <- survfit(surv_attempt ~ Treatment , data = para_df)
+
+# First Success
+surv_success <- Surv(time = para_df$First.success, event = para_df$event_success)
+km_success <- survfit(surv_success ~ Treatment, data = para_df)
+
+
+cox_approach <- coxphf(Surv(First.approach, event_approach) ~ Treatment, data = para_df)
+summary(cox_approach)
+
+cox_attempt <- coxphf(Surv(First.attempt, event_attempt) ~ Treatment, data = para_df)
+summary(cox_attempt)
+
+cox_success <- coxphf(Surv(First.success, event_success) ~ Treatment, data = para_df)
+summary(cox_success)
+```
+
+## Survival Analysis, HT data
+Learning from the analysis of my data from MT, I decided to skip the ANOVA and start with a Kaplan Meier curve:
+
+``` {r reading HT, echo = FALSE}
+obsv_df <- read.csv("/cloud/project/data/ResultsHT.csv")
+# Convert "mm:ss.ms" format to total seconds
+obsv_df$First.attempt <- sapply(obsv_df$First.attempt, function(x) {
+  time_parts <- unlist(strsplit(x, ":"))  # Split minutes and seconds
+  as.numeric(time_parts[1]) * 60 + as.numeric(time_parts[2])  # Convert to total seconds
+})
+obsv_df$First.success <- sapply(obsv_df$First.success, function(x) {
+  time_parts <- unlist(strsplit(x, ":"))  # Split minutes and seconds
+  as.numeric(time_parts[1]) * 60 + as.numeric(time_parts[2])  # Convert to total seconds
+})
+obsv_df$First.approach <- sapply(obsv_df$First.approach, function(x) {
+  time_parts <- unlist(strsplit(x, ":"))  # Split minutes and seconds
+  as.numeric(time_parts[1]) * 60 + as.numeric(time_parts[2])  # Convert to total seconds
+})
+```
+
+``` {r Kaplan Meier HT}
+##CREATING THE KAPLAN MEIER FOR MULTIPLE TIME-TO-EVENT##
+obsv_df$event_approach <- ifelse(is.na(obsv_df$First.approach), 0, 1)
+obsv_df$event_attempt <- ifelse(is.na(obsv_df$First.attempt), 0, 1)
+obsv_df$event_success <- ifelse(is.na(obsv_df$First.success), 0, 1)
+# changing NAs into max time 
+max_time <- 3600
+obsv_df$First.approach[is.na(obsv_df$First.approach)] <- max_time
+obsv_df$First.attempt[is.na(obsv_df$First.attempt)] <- max_time
+obsv_df$First.success[is.na(obsv_df$First.success)] <- max_time
+
+# First Approach
+surv_approach <- Surv(time = obsv_df$First.approach, event = obsv_df$event_approach)
+km_approach <- survfit(surv_approach ~ Treatment, data = obsv_df)
+
+# First Attempt
+surv_attempt <- Surv(time = obsv_df$First.attempt, event = obsv_df$event_attempt)
+km_attempt <- survfit(surv_attempt ~ Treatment , data = obsv_df)
+
+# First Success
+surv_success <- Surv(time = obsv_df$First.success, event = obsv_df$event_success)
+km_success <- survfit(surv_success ~ Treatment, data = obsv_df)
+# Create a combined dataframe
+km_data <- bind_rows(
+  data.frame(Time = obsv_df$First.approach, Event = obsv_df$event_approach, 
+             Treatment = obsv_df$Treatment, Type = "Approach"),
+  data.frame(Time = obsv_df$First.attempt, Event = obsv_df$event_attempt, 
+             Treatment = obsv_df$Treatment, Type = "Attempt"),
+  data.frame(Time = obsv_df$First.success, Event = obsv_df$event_success, 
+             Treatment = obsv_df$Treatment, Type = "Success")
+)
+
+# Fit Kaplan-Meier survival curves
+km_fit <- survfit(Surv(Time, Event) ~ Treatment + Type, data = km_data)
+
+# Plot with facet_wrap
+n_groups = length(unique(obsv_df$Treatment))
+my_palette <- viridis(n_groups, option = "D") # creating a custom palette 
+
+HT_plot = ggsurvplot_facet(km_fit, km_data, facet.by = "Type", 
+                 legend.labs = c("207", "74", "C207", "C74", "CON"),
+                 xlab = "Time (s)",
+                 aes = aes(colour = strata), 
+                 ylab = "Proportion of wasps yet to act",
+                 conf.int = FALSE,
+                 size = 1,
+                 palette = my_palette,
+                 pval = TRUE,
+                 pval.coord = c(1800, 0.95),
+                 pval.size = 10, 
+                 xlim = c(0,3600), 
+                 risk.table = FALSE,
+                 break.time.by = 200,
+                 ggtheme = theme_light()) +
+  facet_grid(Type ~ .) +
+  theme(strip.text = element_text(size = 12, color = "black"))
+
+print(HT_plot)
+
+```
+
+``` {r Cox phf}
+obsv_df$Treatment <- factor(obsv_df$Treatment)  # Convert to factor if it's not already
+obsv_df$Treatment <- relevel(obsv_df$Treatment, ref = "CON")  # Set "CON" as reference
+
+cox_approach <- coxphf(Surv(time = obsv_df$First.approach, event = obsv_df$event_approach) ~ Treatment, data = obsv_df)
+summary(cox_approach)
+
+cox_attempt <- coxphf(Surv(First.attempt, event_attempt) ~ Treatment, data = obsv_df)
+summary(cox_attempt)
+
+cox_success <- coxphf(Surv(First.success, event_success) ~ Treatment, data = obsv_df)
+summary(cox_success)
+```

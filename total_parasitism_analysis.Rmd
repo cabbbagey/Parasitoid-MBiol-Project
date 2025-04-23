@@ -1,0 +1,159 @@
+---
+title: "Total_parasitism_analysis"
+output: html_document
+---
+
+``` {r required packages, include = FALSE}
+library(arm, quietly = TRUE) # display(), coefplot() etc.
+library(ggeffects, quietly = TRUE) # Estimated Marginal Means
+library(ggfortify, quietly = TRUE) # autoplot()
+library(marginaleffects, quietly = TRUE) # Estimated Marginal Means
+library(SMPracticals, quietly = TRUE) # darwin dataframe
+library("tidyverse")
+library("lubridate")
+library("viridis")
+library(dplyr)
+library(emmeans)
+```
+
+## Total parasitism analysis, MT data
+Reading in the data:
+
+``` {r reading data}
+tot_df = read_csv("/cloud/project/data/total_para.csv")
+tot_df$Prop.para = tot_df$Mummies/tot_df$Total
+print(tot_df)
+```
+
+Visualising the data:
+
+``` {r visualisation}
+ggplot(data = tot_df, aes(x = Treatment, y = Prop.para, 
+                          fill = Treatment)) +
+  labs(y = "Proportion parasitised") +
+  scale_x_discrete(limits=c("NL", "L", "T10", "T50")) +
+  geom_boxplot() +
+  theme_minimal() +
+  scale_fill_viridis(discrete = TRUE, option = "D")
+```
+
+It might be better to use a bar graph:
+
+``` {r visualisation 2}
+para_prop = group_by(tot_df, Treatment)
+by_treatments = summarise(group_by(para_prop, Treatment),
+                           mean_proportion = mean(Prop.para),
+                           std_dev_proportion = sd(Prop.para)) 
+print(by_treatments)
+
+ggplot(data = by_treatments, aes(x = Treatment, y = mean_proportion, fill = Treatment)) +
+  labs(y = "Proportion parasitised") +
+  scale_x_discrete(limits=c("NL", "L", "T10", "T50")) +
+  geom_bar(stat="identity") +
+  geom_errorbar(
+    aes(ymin = mean_proportion - std_dev_proportion, ymax = mean_proportion + std_dev_proportion),  # Use std_value directly
+    width = 0.2, position = position_dodge(0.7))+
+  theme_bw() +
+  scale_fill_viridis(discrete = TRUE, option = "D")
+  
+```
+
+Now to analyse the data, using a GLM
+
+```{r analysis}
+# Ensure column names are clean
+names(tot_df) <- trimws(names(tot_df))
+
+# Calculate proportion parasitism based on surviving aphids
+tot_df <- tot_df %>%
+  mutate(Prop_Parasitism = Mummies / (Mummies + Surviving))
+
+# Fit a binomial GLM
+glm_para <- glm(cbind(Mummies, Surviving) ~ Treatment, 
+                family = binomial, data = tot_df)
+# Show summary
+summary(glm_para)
+pairwise_comp = emmeans(glm_para, specs = pairwise ~ Treatment)
+summary(pairwise_comp)
+```
+
+This was an unexpected result, so I added date as a covariate, to check for any effects it may have 
+
+```{r covariate}
+
+tot_df$Date = as.Date(tot_df$Date, format = "%d.%m") #making sure R recognises this as a date 
+tot_df$Date = as.factor(tot_df$Date) #changing into a factor, as each date is a separate experimental day
+
+#now adding date into the model
+glm_para <- glm(cbind(Mummies, Surviving) ~ Treatment + Date, 
+                family = binomial, data = tot_df) 
+summary(glm_para)
+pairwise_comp = emmeans(glm_para, specs = pairwise ~ Treatment)
+summary(pairwise_comp)
+
+```
+There was a higher parasitism rate on 28-01, but a quick check of the data shows that T10 was no underrepresented on that day. Therefore, it's safe to assume that the significant result is not influenced by the date! 
+
+## Total parasitism analysis, HT data
+Reading in the data:
+
+``` {r reading HT}
+tot_df2 = read_csv("/cloud/project/data/totalHT.csv")
+print(tot_df2)
+
+tot_df2$Prop.para = tot_df2$Mummies/tot_df2$Total
+```
+
+For this dataset, I was unable to find the survival count for all replicates, so I used the total aphids (in the beginning of the assay) as the denominator for our proportions. 
+
+Visualising the data with boxplots and bar graphs:
+
+``` {r visualisation HT}
+#visualising the data:
+ggplot(data = tot_df2, aes(x = Treatment, y = Prop.para, 
+                          colour = Treatment )) +
+  labs(y = "Proportion parasitised") +
+  scale_x_discrete(limits=c("CON", "207", "74", "C207", "C74")) +
+  geom_boxplot() +
+  theme_bw() +
+  scale_colour_viridis(discrete = TRUE, option = "D")
+
+#looking at a bar graph
+para_prop = group_by(tot_df2, Treatment)
+by_treatments2 = summarise(group_by(para_prop, Treatment),
+                           mean_proportion = mean(Prop.para),
+                           std_dev_proportion = sd(Prop.para))
+
+ggplot(data = by_treatments2, aes(x = Treatment, y = mean_proportion, fill = Treatment)) +
+  labs(y = "Proportion parasitised") +
+  scale_x_discrete(limits=c("CON", "207", "74", "C207", "C74")) +
+  geom_bar(stat="identity") +
+  geom_errorbar(
+    aes(ymin = mean_proportion - std_dev_proportion, ymax = mean_proportion + std_dev_proportion),  # Use std_value directly
+    width = 0.2, position = position_dodge(0.7)) +
+  theme_bw() +
+   scale_fill_viridis(discrete = TRUE, option = "D")
+```
+
+Building a GLM for the HT data:
+``` {r GLM HT}
+tot_mod2 = lm(Prop.para~Treatment, tot_df2)
+
+glm_para2 <- glm(cbind(Mummies, Total) ~ Treatment, 
+                family = binomial, data = tot_df2)
+
+summary(glm_para2)
+pairwise_comp2 = emmeans(glm_para2, specs = pairwise ~ Treatment)
+summary(pairwise_comp2)
+
+# adding date as a covariate into the model 
+tot_df2$Date = as.Date(tot_df2$Date, format = "%d.%m") #making sure R recognises this as a date 
+tot_df2$Date = as.factor(tot_df2$Date) #changing into a factor, as each date is a separate experimental day
+
+#now adding date into the model
+glm_para2 <- glm(cbind(Mummies, Total) ~ Treatment + Date, 
+                family = binomial, data = tot_df2) 
+summary(glm_para2)
+pairwise_comp2 = emmeans(glm_para2, specs = pairwise ~ Treatment)
+summary(pairwise_comp2)
+```
